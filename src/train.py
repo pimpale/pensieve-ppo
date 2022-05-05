@@ -6,14 +6,13 @@ import ppo as PPOAgent
 
 class Trainer():
     def __init__(self):
-
-
+        self.observation = self.env.reset()
 
         # TODO
         agent_id = 100
 
         self.episode = 0
-        self.agent = agent
+        self.agent = PPOAgent(gamma=)
         self.env = ABREnv(agent_id)
 
     def reset_env(self):

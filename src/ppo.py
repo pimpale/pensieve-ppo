@@ -26,6 +26,12 @@ def proximal_policy_optimization_loss(advantage, old_prediction):
     return loss
 
 
+def transform_reward(reward:list[float]):
+
+    for j in range(len(reward) - 2, -1, -1):
+        self.reward[j] += self.reward[j + 1] * GAMMA
+
+
 class PPOAgent:
     def __init__(self, network_history_len:int, available_video_sizes_count:int):
         self.network_history_len = network_history_len
@@ -149,37 +155,33 @@ class PPOAgent:
 
         return model
 
-    def predict(self):
-        self.actor.predict(
+    def get_action(
+                self,
+                historical_network_throughput:list[float],
+                historical_chunk_download_time:list[float],
+                available_video_sizes:list[float],
+                buffer_level:float,
+                remaining_chunk_count:float,
+                last_chunk_bitrate:float
 
-    def get_action(self):
-        p = self.actor.predict([self.observation.reshape(1, NUM_STATE), DUMMY_VALUE, DUMMY_ACTION])
-        if self.val is False:
+    ):
+        p = self.actor.predict([
+            historical_network_throughput,
+            historical_chunk_download_time,
+            available_video_sizes,
+            buffer_level,
+            remaining_chunk_count,
+            last_chunk_bitrate
+        ])
+        return p
 
-            action = np.random.choice(NUM_ACTIONS, p=np.nan_to_num(p[0]))
-        else:
-            action = np.argmax(p[0])
-        action_matrix = np.zeros(NUM_ACTIONS)
-        action_matrix[action] = 1
-        return action, action_matrix, p
-
-    def transform_reward(self):
-        if self.val is True:
-            self.writer.add_scalar('Val episode reward', np.array(self.reward).sum(), self.episode)
-        else:
-            self.writer.add_scalar('Episode reward', np.array(self.reward).sum(), self.episode)
-        for j in range(len(self.reward) - 2, -1, -1):
-            self.reward[j] += self.reward[j + 1] * GAMMA
 
     def get_batch(self):
         batch = [[], [], [], []]
 
         tmp_batch = [[], [], []]
         while len(batch[0]) < BUFFER_SIZE:
-            if CONTINUOUS is False:
-                action, action_matrix, predicted_action = self.get_action()
-            else:
-                action, action_matrix, predicted_action = self.get_action_continuous()
+            action, action_matrix, predicted_action = self.get_action()
             observation, reward, done, info = self.env.step(action)
             self.reward.append(reward)
 
