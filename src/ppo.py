@@ -26,7 +26,7 @@ def proximal_policy_optimization_loss(advantage, old_prediction):
     return loss
 
 
-class Agent:
+class PPOAgent:
     def __init__(self, network_history_len:int, available_video_sizes_count:int):
         self.network_history_len = network_history_len
         self.available_video_sizes_count = available_video_sizes_count
@@ -149,14 +149,8 @@ class Agent:
 
         return model
 
-    def reset_env(self):
-        self.episode += 1
-        if self.episode % 100 == 0:
-            self.val = True
-        else:
-            self.val = False
-        self.observation = self.env.reset()
-        self.reward = []
+    def predict(self):
+        self.actor.predict(
 
     def get_action(self):
         p = self.actor.predict([self.observation.reshape(1, NUM_STATE), DUMMY_VALUE, DUMMY_ACTION])
