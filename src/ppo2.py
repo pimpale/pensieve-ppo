@@ -68,18 +68,15 @@ class Network():
         self.a_dim = action_dim
         self.lr_rate = learning_rate
         self.sess = sess
-        self._entropy_weight = np.log(self.a_dim)
         self.H_target = 0.1
 
         self.R = tf.placeholder(tf.float32, [None, 1])
         self.inputs = tf.placeholder(tf.float32, [None, self.s_dim[0], self.s_dim[1]])
         self.old_pi = tf.placeholder(tf.float32, [None, self.a_dim])
         self.acts = tf.placeholder(tf.float32, [None, self.a_dim])
-        self.entropy_weight = tf.placeholder(tf.float32)
         self.pi, self.val = self.CreateNetwork(inputs=self.inputs)
         self.real_out = tf.clip_by_value(self.pi, ACTION_EPS, 1. - ACTION_EPS)
         
-        self.entropy = -tf.reduce_sum(tf.multiply(self.real_out, tf.log(self.real_out)), reduction_indices=1, keepdims=True)
         self.adv = tf.stop_gradient(self.R - self.val)
         self.ppo2loss = tf.minimum(self.r(self.real_out, self.old_pi, self.acts) * self.adv, 
                             tf.clip_by_value(self.r(self.real_out, self.old_pi, self.acts), 1 - EPS, 1 + EPS) * self.adv
@@ -102,7 +99,7 @@ class Network():
             self.set_network_params_op.append(
                 self.network_params[idx].assign(param))
         
-        self.policy_loss = - tf.reduce_sum(self.dual_loss) - self.entropy_weight * tf.reduce_sum(self.entropy)
+        self.policy_loss = - tf.reduce_sum(self.dual_loss)
         self.policy_opt = tf.train.AdamOptimizer(self.lr_rate).minimize(self.policy_loss)
         self.val_loss = tflearn.mean_square(self.val, self.R)
         self.val_opt = tf.train.AdamOptimizer(self.lr_rate * 10.).minimize(self.val_loss)
@@ -119,14 +116,7 @@ class Network():
             self.acts: a_batch,
             self.R: v_batch, 
             self.old_pi: p_batch,
-            self.entropy_weight: self._entropy_weight
         })
-        # adaptive entropy weight
-        # https://arxiv.org/abs/2003.13590
-        p_batch = np.clip(p_batch, ACTION_EPS, 1. - ACTION_EPS)
-        _H = np.mean(np.sum(-np.log(p_batch) * p_batch, axis=1))
-        _g = _H - self.H_target
-        self._entropy_weight -= self.lr_rate * _g * 0.1
 
     def compute_v(self, s_batch, a_batch, r_batch, terminal):
         ba_size = len(s_batch)

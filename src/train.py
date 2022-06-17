@@ -42,20 +42,18 @@ def testing(epoch, nn_model, log_file):
     os.system('python test.py ' + nn_model)
 
     # append test performance to the log
-    rewards, entropies = [], []
+    rewards = []
     test_log_files = os.listdir(TEST_LOG_FOLDER)
     for test_log_file in test_log_files:
-        reward, entropy = [], []
+        reward= []
         with open(TEST_LOG_FOLDER + test_log_file, 'rb') as f:
             for line in f:
                 parse = line.split()
                 try:
-                    entropy.append(float(parse[-2]))
                     reward.append(float(parse[-1]))
                 except IndexError:
                     break
         rewards.append(np.mean(reward[1:]))
-        entropies.append(np.mean(entropy[1:]))
 
     rewards = np.array(rewards)
 
@@ -75,7 +73,7 @@ def testing(epoch, nn_model, log_file):
                    str(rewards_max) + '\n')
     log_file.flush()
 
-    return rewards_mean, np.mean(entropies)
+    return rewards_mean
         
 def central_agent(net_params_queues, exp_queues):
 
@@ -126,14 +124,12 @@ def central_agent(net_params_queues, exp_queues):
                 # Save the neural net parameters to disk.
                 save_path = saver.save(sess, SUMMARY_DIR + "/nn_model_ep_" +
                                        str(epoch) + ".ckpt")
-                avg_reward, avg_entropy = testing(epoch,
+                avg_reward = testing(epoch,
                     SUMMARY_DIR + "/nn_model_ep_" + str(epoch) + ".ckpt", 
                     test_log_file)
 
                 summary_str = sess.run(summary_ops, feed_dict={
-                    summary_vars[0]: actor._entropy_weight,
-                    summary_vars[1]: avg_reward,
-                    summary_vars[2]: avg_entropy
+                    summary_vars[0]: avg_reward,
                 })
                 writer.add_summary(summary_str, epoch)
                 writer.flush()
@@ -180,14 +176,10 @@ def agent(agent_id, net_params_queue, exp_queue):
             actor.set_network_params(actor_net_params)
 
 def build_summaries():
-    entropy_weight = tf.Variable(0.)
-    tf.summary.scalar("Entropy Weight", entropy_weight)
     eps_total_reward = tf.Variable(0.)
     tf.summary.scalar("Reward", eps_total_reward)
-    entropy = tf.Variable(0.)
-    tf.summary.scalar("Entropy", entropy)
 
-    summary_vars = [entropy_weight, eps_total_reward, entropy]
+    summary_vars = [eps_total_reward]
     summary_ops = tf.summary.merge_all()
 
     return summary_ops, summary_vars

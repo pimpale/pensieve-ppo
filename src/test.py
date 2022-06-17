@@ -67,8 +67,6 @@ def main():
         s_batch = [np.zeros((S_INFO, S_LEN))]
         a_batch = [action_vec]
         r_batch = []
-        entropy_record = []
-        entropy_ = 0.5
         video_count = 0
         
         while True:  # serve video forever
@@ -99,7 +97,6 @@ def main():
                            str(rebuf) + '\t' +
                            str(video_chunk_size) + '\t' +
                            str(delay) + '\t' +
-                           str(entropy_) + '\t' + 
                            str(reward) + '\n')
             log_file.flush()
 
@@ -125,8 +122,6 @@ def main():
             bit_rate = np.argmax(np.log(action_prob) + noise)
             
             s_batch.append(state)
-            entropy_ = -np.dot(action_prob, np.log(action_prob))
-            entropy_record.append(entropy_)
 
             if end_of_video:
                 log_file.write('\n')
@@ -144,8 +139,6 @@ def main():
 
                 s_batch.append(np.zeros((S_INFO, S_LEN)))
                 a_batch.append(action_vec)
-                # print(np.mean(entropy_record))
-                entropy_record = []
 
                 video_count += 1
 
