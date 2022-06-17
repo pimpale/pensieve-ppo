@@ -25,22 +25,16 @@ def proximal_policy_optimization_loss(advantage, old_prediction):
         return -K.mean(K.minimum(r * advantage, K.clip(r, min_value=1 - LOSS_CLIPPING, max_value=1 + LOSS_CLIPPING) * advantage) + ENTROPY_LOSS * -(prob * K.log(prob + 1e-10)))
     return loss
 
-
-def transform_reward(reward:list[float]):
-
-    for j in range(len(reward) - 2, -1, -1):
-        self.reward[j] += self.reward[j + 1] * GAMMA
-
-
 class PPOAgent:
     def __init__(self, network_history_len:int, available_video_sizes_count:int):
         self.network_history_len = network_history_len
         self.available_video_sizes_count = available_video_sizes_count
-        self.actor = self.build_actor()
-        self.critic = self.build_critic()
+        self.actor = self.__build_actor()
+        self.critic = self.__build_critic()
         
 
-    def build_actor(self):
+    # Private
+    def __build_actor(self):
         # network throughput measurements for the last k video chunks
         feature_historical_network_throughput = keras.layers.Input(shape=(self.network_history_len,1))
         # chunk download times for the last k video chunks
@@ -107,8 +101,8 @@ class PPOAgent:
 
         return model
 
-
-    def build_critic(self):
+    # Private
+    def __build_critic(self):
         # network throughput measurements for the last k video chunks
         feature_historical_network_throughput = keras.layers.Input(shape=(self.network_history_len,1))
         # chunk download times for the last k video chunks
@@ -163,7 +157,6 @@ class PPOAgent:
                 buffer_level:float,
                 remaining_chunk_count:float,
                 last_chunk_bitrate:float
-
     ):
         p = self.actor.predict([
             historical_network_throughput,
@@ -175,35 +168,21 @@ class PPOAgent:
         ])
         return p
 
+    def save(self, actor_path:str, critic_path:str):
+        self.actor.save(actor_path);
+        self.critic.save(critic_path);
 
-    def get_batch(self):
-        batch = [[], [], [], []]
+    def load(self, actor_path:str, critic_path:str):
+        self.actor = keras.models.load_model(actor_path);
+        self.critic = keras.models.load_model(critic_path);
 
-        tmp_batch = [[], [], []]
-        while len(batch[0]) < BUFFER_SIZE:
-            action, action_matrix, predicted_action = self.get_action()
-            observation, reward, done, info = self.env.step(action)
-            self.reward.append(reward)
+    def get_network_params(self):
+        return [
+          self.actor.get_weights(),
+          self.critic.get_weights(),
+        ]
 
-            tmp_batch[0].append(self.observation)
-            tmp_batch[1].append(action_matrix)
-            tmp_batch[2].append(predicted_action)
-            self.observation = observation
-
-            if done:
-                self.transform_reward()
-                if self.val is False:
-                    for i in range(len(tmp_batch[0])):
-                        obs, action, pred = tmp_batch[0][i], tmp_batch[1][i], tmp_batch[2][i]
-                        r = self.reward[i]
-                        batch[0].append(obs)
-                        batch[1].append(action)
-                        batch[2].append(pred)
-                        batch[3].append(r)
-                tmp_batch = [[], [], []]
-                self.reset_env()
-
-        obs, action, pred, reward = np.array(batch[0]), np.array(batch[1]), np.array(batch[2]), np.reshape(np.array(batch[3]), (len(batch[3]), 1))
-        pred = np.reshape(pred, (pred.shape[0], pred.shape[2]))
-        return obs, action, pred, reward
+    def set_network_params(self, weights):
+        self.actor.set_weights(weights[0])
+        self.critic.set_weights(weights[1])
 
