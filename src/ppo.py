@@ -11,19 +11,11 @@ HIST_CONV_FILTERS = 128
 HIDDEN_LAYER_SIZE = 128
 
 LR = 1e-4  # Lower lr stabilises training greatly
-ACTION_EPS = 1e-4
 GAMMA = 0.99
+
+# PPO2
 LOSS_CLIPPING=0.1
 ENTROPY_LOSS =0.1
-
-
-def proximal_policy_optimization_loss(advantage, old_prediction):
-    def loss(y_true, y_pred):
-        prob = K.sum(y_true * y_pred, axis=-1)
-        old_prob = K.sum(y_true * old_prediction, axis=-1)
-        r = prob/(old_prob + 1e-10)
-        return -K.mean(K.minimum(r * advantage, K.clip(r, min_value=1 - LOSS_CLIPPING, max_value=1 + LOSS_CLIPPING) * advantage) + ENTROPY_LOSS * -(prob * K.log(prob + 1e-10)))
-    return loss
 
 class PPOAgent:
     def __init__(self, network_history_len:int, available_video_sizes_count:int):
@@ -31,7 +23,6 @@ class PPOAgent:
         self.available_video_sizes_count = available_video_sizes_count
         self.actor = self.__build_actor()
         self.critic = self.__build_critic()
-        
 
     # Private
     def __build_actor(self):
@@ -73,10 +64,10 @@ class PPOAgent:
         advantage = keras.layers.Input(shape=(1,))
 
         model = keras.Model(
-            inputs=[
+            inputs=[(
                 # ppo features
-                old_prediction,
                 advantage,
+                old_prediction,
                 # real features
                 feature_historical_network_throughput,
                 feature_historical_chunk_download_time,
@@ -84,18 +75,19 @@ class PPOAgent:
                 feature_buffer_level,
                 feature_remaining_chunk_count,
                 feature_last_chunk_bitrate
-            ],
+            )],
             outputs=[out_actions]
         )
 
+        def actor_loss(y_true, y_pred):
+            prob = K.sum(y_true * y_pred, axis=-1)
+            old_prob = K.sum(y_true * old_prediction, axis=-1)
+            r = prob/(old_prob + 1e-10)
+            return -K.mean(K.minimum(r * advantage, K.clip(r, min_value=1 - LOSS_CLIPPING, max_value=1 + LOSS_CLIPPING) * advantage) + ENTROPY_LOSS * -(prob * K.log(prob + 1e-10)))
+
         model.compile(
             optimizer=keras.optimizer.Adam(lr=LR),
-            loss=[
-                proximal_policy_optimization_loss(
-                    advantage=advantage,
-                    old_prediction=old_prediction
-                 )
-            ]
+            loss=actor_loss
         )
         model.summary()
 
@@ -131,42 +123,23 @@ class PPOAgent:
 
         hidden_layer = keras.layers.Dense(HIDDEN_LAYER_SIZE, activation='relu')(hidden_layer_input)
 
-        out_actions = keras.layers.Dense(self.available_video_sizes_count, activation='linear')(hidden_layer)
+        value = keras.layers.Dense(1, activation='linear')(hidden_layer)
 
         model = keras.Model(
-            inputs=[
+            inputs=[(
                 feature_historical_network_throughput,
                 feature_historical_chunk_download_time,
                 feature_available_video_sizes,
                 feature_buffer_level,
                 feature_remaining_chunk_count,
                 feature_last_chunk_bitrate
-            ],
-            outputs=[out_actions]
+            )],
+            outputs=[value]
         )
 
         model.compile(optimizer=keras.optimizer.Adam(lr=LR), loss='mse')
 
         return model
-
-    def get_action(
-                self,
-                historical_network_throughput:list[float],
-                historical_chunk_download_time:list[float],
-                available_video_sizes:list[float],
-                buffer_level:float,
-                remaining_chunk_count:float,
-                last_chunk_bitrate:float
-    ):
-        p = self.actor.predict([
-            historical_network_throughput,
-            historical_chunk_download_time,
-            available_video_sizes,
-            buffer_level,
-            remaining_chunk_count,
-            last_chunk_bitrate
-        ])
-        return p
 
     def save(self, actor_path:str, critic_path:str):
         self.actor.save(actor_path);
@@ -185,4 +158,68 @@ class PPOAgent:
     def set_network_params(self, weights):
         self.actor.set_weights(weights[0])
         self.critic.set_weights(weights[1])
+
+    def predict(
+        self,
+        state_batch: list[tuple[
+            list[float], # historical_network_throughput
+            list[float], # historical_chunk_download_time
+            list[float], # available_video_sizes
+            float, # buffer_level
+            float, # remaining_chunk_count
+            float # last_chunk_bitrate
+        ]],
+    ):
+        p = self.actor.predict((
+          tf.None
+          state_batch
+
+        ))
+        return p
+
+    def train(
+        self,
+        # ppo features
+        old_prediction,
+        advantage,
+        # real features
+        feature_historical_network_throughput,
+        feature_historical_chunk_download_time,
+        feature_available_video_sizes,
+        feature_buffer_level,
+        feature_remaining_chunk_count,
+        feature_last_chunk_bitrate
+    ):
+        pass
+
+
+    # value function
+    def compute_v(
+        self,
+        state_batch: list[tuple[
+            list[float], # historical_network_throughput
+            list[float], # historical_chunk_download_time
+            list[float], # available_video_sizes
+            float, # buffer_level
+            float, # remaining_chunk_count
+            float # last_chunk_bitrate
+        ]],
+        reward_batch: list[float],
+        terminal: bool
+    ):
+        assert len(state_batch) == len(reward_batch)
+
+        ba_size= len(state_batch)
+        R_batch = np.zeros([len(reward_batch), 1])
+
+        if terminal:
+            R_batch[-1, 0] = 0  # terminal state
+        else:    
+            v_batch = self.critic.predict(state_batch)
+            R_batch[-1, 0] = v_batch[-1, 0]  # boot strap from last state
+        # Use GAMMA to decay value 
+        for t in reversed(range(ba_size - 1)):
+            R_batch[t, 0] = reward_batch[t] + GAMMA * R_batch[t + 1, 0]
+
+        return list(R_batch)
 
