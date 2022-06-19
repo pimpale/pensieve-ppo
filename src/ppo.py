@@ -86,7 +86,7 @@ class PPOAgent:
             return -K.mean(K.minimum(r * advantage, K.clip(r, min_value=1 - LOSS_CLIPPING, max_value=1 + LOSS_CLIPPING) * advantage) + ENTROPY_LOSS * -(prob * K.log(prob + 1e-10)))
 
         model.compile(
-            optimizer=keras.optimizer.Adam(lr=LR),
+            optimizer=keras.optimizers.Adam(lr=LR),
             loss=actor_loss
         )
         model.summary()
@@ -96,23 +96,23 @@ class PPOAgent:
     # Private
     def __build_critic(self):
         # network throughput measurements for the last k video chunks
-        feature_historical_network_throughput = keras.layers.Input(shape=(self.network_history_len,1))
+        feature_historical_network_throughput = keras.layers.Input(shape=[self.network_history_len])
         # chunk download times for the last k video chunks
-        feature_historical_chunk_download_time = keras.layers.Input(shape=(self.network_history_len,1))
+        feature_historical_chunk_download_time = keras.layers.Input(shape=[self.network_history_len])
         # a vector of m available sizes for the next video chunk
-        feature_available_video_sizes = keras.layers.Input(shape=(self.available_video_sizes_count,1))
+        feature_available_video_sizes = keras.layers.Input(shape=[self.available_video_sizes_count])
         # the current buffer level
-        feature_buffer_level = keras.layers.Input(shape=(1,))
+        feature_buffer_level = keras.layers.Input(shape=[1])
         # number of chunks remaining in the video
-        feature_remaining_chunk_count = keras.layers.Input(shape=(1,))
+        feature_remaining_chunk_count = keras.layers.Input(shape=[1])
         # bitrate at which the last chunk was downloaded
-        feature_last_chunk_bitrate = keras.layers.Input(shape=(1,))
+        feature_last_chunk_bitrate = keras.layers.Input(shape=[1])
 
         convolved_historical_network_throughput = keras.layers.Conv1D(HIST_CONV_FILTERS, 4, activation='relu')(feature_historical_network_throughput)
         convolved_historical_chunk_download_time = keras.layers.Conv1D(HIST_CONV_FILTERS, 4, activation='relu')(feature_historical_chunk_download_time)
         convolved_available_video_sizes = keras.layers.Conv1D(VID_CONV_FILTERS, 4, activation='relu')(feature_available_video_sizes)
 
-        hidden_layer_input = keras.layers.Concatenate(axis=0)([
+        hidden_layer_input = keras.layers.Concatenate()([
           keras.layers.Flatten()(convolved_historical_network_throughput),
           keras.layers.Flatten()(convolved_historical_chunk_download_time),
           keras.layers.Flatten()(convolved_available_video_sizes),
@@ -126,28 +126,28 @@ class PPOAgent:
         value = keras.layers.Dense(1, activation='linear')(hidden_layer)
 
         model = keras.Model(
-            inputs=[(
+            inputs=[
                 feature_historical_network_throughput,
                 feature_historical_chunk_download_time,
                 feature_available_video_sizes,
                 feature_buffer_level,
                 feature_remaining_chunk_count,
                 feature_last_chunk_bitrate
-            )],
+            ],
             outputs=[value]
         )
 
-        model.compile(optimizer=keras.optimizer.Adam(lr=LR), loss='mse')
+        model.compile(optimizer=keras.optimizers.Adam(lr=LR), loss='mse')
 
         return model
 
     def save(self, actor_path:str, critic_path:str):
-        self.actor.save(actor_path);
-        self.critic.save(critic_path);
+        self.actor.save(actor_path)
+        self.critic.save(critic_path)
 
     def load(self, actor_path:str, critic_path:str):
-        self.actor = keras.models.load_model(actor_path);
-        self.critic = keras.models.load_model(critic_path);
+        self.actor = keras.models.load_model(actor_path)
+        self.critic = keras.models.load_model(critic_path)
 
     def get_network_params(self):
         return [
@@ -170,27 +170,85 @@ class PPOAgent:
             float # last_chunk_bitrate
         ]],
     ):
-        p = self.actor.predict((
-          tf.None
-          state_batch
+        # Convert state batch into correct format
+        historical_network_throughput = np.zeros((len(state_batch), self.network_history_len)) 
+        historical_chunk_download_time = np.zeros((len(state_batch), self.network_history_len)) 
+        available_video_sizes = np.zeros((len(state_batch), self.available_video_sizes_count))
+        buffer_level = np.zeros((len(state_batch), 1))
+        remaining_chunk_count  = np.zeros((len(state_batch), 1))
+        last_chunk_bitrate  = np.zeros((len(state_batch), 1))
 
-        ))
+        # Create other PPO2 things (needed for training, but during inference we dont care)
+        advantage = np.zeros((len(state_batch), 1))
+        old_prediction = np.zeros((len(state_batch), self.available_video_sizes_count))
+
+        for (i, s) in enumerate(state_batch):
+            historical_network_throughput[i],
+            historical_chunk_download_time[i],
+            available_video_sizes[i],
+            buffer_level[i],
+            remaining_chunk_count[i],
+            last_chunk_bitrate[i] = s
+
+        p = self.actor.predict([
+            advantage,
+            old_prediction,
+            historical_network_throughput,
+            historical_chunk_download_time,
+            available_video_sizes,
+            buffer_level,
+            remaining_chunk_count,
+            last_chunk_bitrate,
+        ])
         return p
 
     def train(
         self,
-        # ppo features
-        old_prediction,
-        advantage,
-        # real features
-        feature_historical_network_throughput,
-        feature_historical_chunk_download_time,
-        feature_available_video_sizes,
-        feature_buffer_level,
-        feature_remaining_chunk_count,
-        feature_last_chunk_bitrate
+        old_prediction_batch: list[float],
+        advantage_batch:list[float],
+        state_batch: list[tuple[
+            list[float], # historical_network_throughput
+            list[float], # historical_chunk_download_time
+            list[float], # available_video_sizes
+            float, # buffer_level
+            float, # remaining_chunk_count
+            float # last_chunk_bitrate
+        ]],
     ):
-        pass
+        assert len(state_batch) == len(advantage_batch) 
+        assert len(state_batch) == len(old_prediction_batch)
+
+        # Convert state batch into correct format
+        historical_network_throughput = np.zeros((len(state_batch), self.network_history_len)) 
+        historical_chunk_download_time = np.zeros((len(state_batch), self.network_history_len)) 
+        available_video_sizes = np.zeros((len(state_batch), self.available_video_sizes_count))
+        buffer_level = np.zeros((len(state_batch), 1))
+        remaining_chunk_count  = np.zeros((len(state_batch), 1))
+        last_chunk_bitrate  = np.zeros((len(state_batch), 1))
+
+        # Create other PPO2 things (needed for training, but during inference we dont care)
+        advantage = np.reshape(advantage_batch, (len(advantage_batch), 1))
+        old_prediction = np.reshape(old_prediction_batch, (len(advantage_batch), 1))
+
+        for (i, s) in enumerate(state_batch):
+            historical_network_throughput[i],
+            historical_chunk_download_time[i],
+            available_video_sizes[i],
+            buffer_level[i],
+            remaining_chunk_count[i],
+            last_chunk_bitrate[i] = s
+
+        p = self.actor.fit([
+            advantage,
+            old_prediction,
+            historical_network_throughput,
+            historical_chunk_download_time,
+            available_video_sizes,
+            buffer_level,
+            remaining_chunk_count,
+            last_chunk_bitrate,
+        ])
+        return p
 
 
     # value function

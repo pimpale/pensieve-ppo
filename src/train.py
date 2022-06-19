@@ -4,8 +4,7 @@ import logging
 import os
 import sys
 from env import ABREnv
-import ppo2 as network
-import tensorflow.compat.v1 as tf
+import ppo as network
 
 os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
@@ -154,6 +153,7 @@ def agent(agent_id, net_params_queue, exp_queue):
         for epoch in range(TRAIN_EPOCH):
             obs = env.reset()
             s_batch, a_batch, p_batch, r_batch = [], [], [], []
+            done = True
             for step in range(TRAIN_SEQ_LEN):
                 s_batch.append(obs)
 
@@ -173,7 +173,7 @@ def agent(agent_id, net_params_queue, exp_queue):
                 p_batch.append(action_prob)
                 if done:
                     break
-            v_batch = actor.compute_v(s_batch, a_batch, r_batch, done)
+            v_batch = actor.compute_v(s_batch, r_batch, done)
             exp_queue.put([s_batch, a_batch, p_batch, v_batch])
 
             actor_net_params = net_params_queue.get()
