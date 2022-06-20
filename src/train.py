@@ -88,16 +88,19 @@ def central_agent(net_params_queues, exp_queues):
         for i in range(NUM_AGENTS):
             net_params_queues[i].put(actor_net_params)
 
-        s, a, p, v = [], [], [], []
+        s_batch:list[Observation] = []
+        a_batch:list[npt.NDArray[np.float32]] = []
+        p_batch:list[npt.NDArray[np.float32]]  = []
+        v_batch:list[float] = []
         for i in range(NUM_AGENTS):
             s_, a_, p_, g_ = exp_queues[i].get()
-            s += s_
-            a += a_
-            p += p_
-            v += g_
+            s_batch += s_
+            a_batch += a_
+            p_batch += p_
+            v_batch += g_
 
         for _ in range(PPO_TRAINING_EPO):
-            actor.train(s, v, p)
+            actor.train(s_batch, a_batch, v_batch, p_batch)
         
         if epoch % MODEL_SAVE_INTERVAL == 0:
             # Save the neural net parameters to disk.
