@@ -4,7 +4,6 @@ import numpy as np
 import numpy.typing as npt
 import logging
 import tensorflow as tf
-from keras.callbacks import TensorBoard
 import os
 import sys
 from env import ABREnv, Observation, AVAILABLE_VIDEO_BITRATES_COUNT, NETWORK_HISTORY_LEN
@@ -73,9 +72,11 @@ def central_agent(net_params_queues, exp_queues):
     actor = network.PPOAgent(NETWORK_HISTORY_LEN, AVAILABLE_VIDEO_BITRATES_COUNT)
 
     # Get Writer
-    tensorboard = TensorBoard(log_dir=SUMMARY_DIR, histogram_freq=0,
-                          write_graph=True, write_images=False)
-    with open(LOG_FILE + '_test.txt', 'w') as test_log_file:
+    writer = tf.summary.create_file_writer(SUMMARY_DIR);
+
+    step=0
+
+    with open(LOG_FILE + '_test.txt', 'w') as test_log_file, writer.as_default():
         for epoch in range(TRAIN_EPOCH):
             # synchronize the network parameters of work agent
             actor_net_params = actor.get_network_params()
@@ -94,7 +95,8 @@ def central_agent(net_params_queues, exp_queues):
                 v_batch += g_
 
             # Train Actor
-            actor.train(s_batch, a_batch, v_batch, p_batch, [tensorboard])
+            steps_trained = actor.train(s_batch, a_batch, v_batch, p_batch, step)
+            step += steps_trained
 
             if epoch % MODEL_SAVE_INTERVAL == 0:
                 # Save the neural net parameters to disk.

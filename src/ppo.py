@@ -243,7 +243,7 @@ class PPOAgent:
         action_batch: list[npt.NDArray[np.float32]],
         advantage_batch:list[float],
         old_prediction_batch: list[npt.NDArray[np.float32]],
-        callbacks
+        base_step:int
     ):
         batch_len = len(state_batch)
         assert batch_len == len(action_batch)
@@ -271,6 +271,13 @@ class PPOAgent:
             remaining_chunk_count[i] = rcc
             last_chunk_bitrate[i] = lcb
 
+        class PrintLoss(keras.callbacks.Callback):
+            def __init__(self, base_step:int, name:str):
+                self.base_step = base_step
+                self.name = name
+            def on_epoch_end(self, epoch, logs):
+                tf.summary.scalar(self.name, logs['loss'], step=self.base_step+epoch)
+
         # Train Actor
         self.actor.fit(
             [
@@ -287,7 +294,7 @@ class PPOAgent:
                 last_chunk_bitrate,
             ],
             epochs=PPO_TRAINING_EPO,
-            callbacks=callbacks
+            callbacks=[PrintLoss(base_step, 'actor_loss')]
         )
 
         # Train Critic
@@ -302,8 +309,10 @@ class PPOAgent:
             ],
             advantage,
             epochs=PPO_TRAINING_EPO,
-            callbacks=callbacks
+            callbacks=[PrintLoss(base_step, 'critic_loss')]
         )
+
+        return PPO_TRAINING_EPO
 
     # value function
     def compute_v(
