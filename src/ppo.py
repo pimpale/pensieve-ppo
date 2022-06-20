@@ -85,10 +85,26 @@ class PPOAgent:
                 feature_remaining_chunk_count,
                 feature_last_chunk_bitrate
             )],
-            outputs=[out_actions]
+            outputs=[out_actions, advantage, old_prediction]
         )
 
+        # Actor Loss only considers the prediction, advantage and old prediction to find loss 
         def actor_loss(y_true, y_pred):
+            # Reward???? IDK what this function does
+            def r(pi_new, pi_old, acts):
+                return K.reduce_sum(tf.multiply(pi_new, acts), reduction_indices=1, keepdims=True) / \
+                        K.reduce_sum(tf.multiply(pi_old, acts), reduction_indices=1, keepdims=True)
+
+
+            # Unpack y_true
+            action, advantage, old_prediction = y_true
+            # Unpack y_pred
+            pred_action, _, _ = y_pred
+
+            ppo2loss = K.minimum(
+              r(pred_action, old_prediction, action) * advantage,
+              K.clip(
+
             prob = K.sum(y_true * y_pred, axis=-1)
             old_prob = K.sum(y_true * old_prediction, axis=-1)
             r = prob/(old_prob + 1e-10)
@@ -209,16 +225,19 @@ class PPOAgent:
             remaining_chunk_count,
             last_chunk_bitrate,
         ])
-        return p
+        return p[0]
 
     def train(
         self,
         state_batch: list[Observation],
-        old_prediction_batch: list[npt.NDArray[np.float32]],
+        action_batch: list[npt.NDArray[np.float32]],
         advantage_batch:list[float],
+        old_prediction_batch: list[npt.NDArray[np.float32]],
     ):
-        assert len(state_batch) == len(advantage_batch) 
-        assert len(state_batch) == len(old_prediction_batch)
+        batch_len = len(state_batch)
+        assert batch_len == len(action_batch)
+        assert batch_len == len(advantage_batch) 
+        assert batch_len == len(old_prediction_batch)
 
         # Convert state batch into correct format
         historical_network_throughput = np.zeros((len(state_batch), self.network_history_len)) 
@@ -229,8 +248,9 @@ class PPOAgent:
         last_chunk_bitrate  = np.zeros((len(state_batch), 1))
 
         # Create other PPO2 things (needed for training, but during inference we dont care)
-        advantage = np.reshape(advantage_batch, (len(advantage_batch), 1))
-        old_prediction = np.reshape(old_prediction_batch, (len(advantage_batch), self.available_video_bitrates_count))
+        action = np.reshape(action_batch, (batch_len, 1))
+        advantage = np.reshape(advantage_batch, (batch_len, 1))
+        old_prediction = np.reshape(old_prediction_batch, (batch_len, self.available_video_bitrates_count))
 
         for (i, (hnt, hcdt, avb, bl, rcc, lcb)) in enumerate(state_batch):
             historical_network_throughput[i] = hnt
@@ -241,16 +261,22 @@ class PPOAgent:
             last_chunk_bitrate[i] = lcb
 
         # Train Actor
-        self.actor.fit([
-            advantage,
-            old_prediction,
-            historical_network_throughput,
-            historical_chunk_download_time,
-            available_video_bitrates,
-            buffer_level,
-            remaining_chunk_count,
-            last_chunk_bitrate,
-        ])
+        self.actor.fit(
+            [
+                # Dummy Advantage
+                np.zeros((batch_len, 1)),
+                # Dummy Old Preduction
+                np.zeros((batch_len, self.available_video_bitrates_count)),
+                # Real values
+                historical_network_throughput,
+                historical_chunk_download_time,
+                available_video_bitrates,
+                buffer_level,
+                remaining_chunk_count,
+                last_chunk_bitrate,
+            ],
+            [ action, advantage, old_prediction ]
+        )
 
         # Train Critic
         self.critic.fit(
