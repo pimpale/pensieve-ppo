@@ -11,6 +11,7 @@ NETWORK_HISTORY_LEN  = 8  # take how many frames in the past
 TRAIN_SEQ_LEN = 100  # take as a train batch
 MODEL_SAVE_INTERVAL = 100
 VIDEO_BIT_RATES:npt.NDArray[np.float32] = np.array([300., 750., 1200., 1850., 2850., 4300.])  # Kbps
+AVAILABLE_VIDEO_BITRATES_COUNT = len(VIDEO_BIT_RATES)
 BUFFER_NORM_FACTOR = 10.0
 CHUNK_TIL_VIDEO_END_CAP = 48.0
 M_IN_K = 1000.0
@@ -32,7 +33,10 @@ Observation = tuple[
 
 
 class ABREnv():
-    def __init__(self, random_seed=RANDOM_SEED):
+    def __init__(
+        self,
+        random_seed=RANDOM_SEED,
+    ):
         np.random.seed(random_seed)
         all_cooked_time, all_cooked_bw, _ = load_trace.load_trace()
         self.net_env = abrenv.Environment(all_cooked_time=all_cooked_time,
@@ -76,10 +80,6 @@ class ABREnv():
           last_chunk_bitrate
         )
 
-    def render(self):
-        return
-
-
     class StepInfo(TypedDict):
         bitrate: float
         rebuffer: bool
@@ -100,14 +100,14 @@ class ABREnv():
 
         self.last_bit_rate_idx = bit_rate_idx
 
-        self.historical_network_throughput = np.roll(self.historical_network_throughput, 1)
-        self.historical_chunk_download_time = np.roll(self.historical_chunk_download_time, 1)
+        self.historical_network_throughput = np.roll(self.historical_network_throughput, -1)
+        self.historical_chunk_download_time = np.roll(self.historical_chunk_download_time, -1)
 
         # Calculate reqs
         last_chunk_bitrate = VIDEO_BIT_RATES[bit_rate_idx] / float(np.max(VIDEO_BIT_RATES))  # last quality
         buffer_level = self.buffer_size / BUFFER_NORM_FACTOR  # 10 sec
         self.historical_network_throughput[0] = float(video_chunk_size) / float(delay) / M_IN_K  # kilo byte / ms
-        self.historical_chunk_download_time[1] = float(delay) / M_IN_K / BUFFER_NORM_FACTOR  # 10 sec
+        self.historical_chunk_download_time[0] = float(delay) / M_IN_K / BUFFER_NORM_FACTOR  # 10 sec
         available_video_bitrates = np.array(next_video_chunk_sizes) / M_IN_K / M_IN_K  # mega byte
         remaining_chunk_count = np.minimum(video_chunk_remain, CHUNK_TIL_VIDEO_END_CAP) / float(CHUNK_TIL_VIDEO_END_CAP)
 

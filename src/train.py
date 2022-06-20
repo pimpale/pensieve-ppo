@@ -1,16 +1,16 @@
+from io import TextIOWrapper
 import multiprocessing as mp
 import numpy as np
 import numpy.typing as npt
 import logging
+import tensorflow as tf
+from keras.callbacks import TensorBoard
 import os
 import sys
-from env import ABREnv, Observation
+from env import ABREnv, Observation, AVAILABLE_VIDEO_BITRATES_COUNT, NETWORK_HISTORY_LEN
 import ppo as network
 
-NETWORK_HISTORY_LEN = 8
-AVAILABLE_VIDEO_BITRATES_COUNT = 6
-ACTOR_LR_RATE = 1e-4
-NUM_AGENTS = 3
+NUM_AGENTS = 16
 TRAIN_SEQ_LEN = 1000  # take as a train batch
 TRAIN_EPOCH = 500000
 MODEL_SAVE_INTERVAL = 300
@@ -20,92 +20,90 @@ MODEL_DIR = './models'
 TRAIN_TRACES = './train/'
 TEST_LOG_FOLDER = './test_results/'
 LOG_FILE = SUMMARY_DIR + '/log'
-PPO_TRAINING_EPO = 5
 
 # create result directory
 if not os.path.exists(SUMMARY_DIR):
     os.makedirs(SUMMARY_DIR)
 
-
-# def testing(epoch, nn_model, log_file):
-#     # clean up the test results folder
-#     os.system('rm -r ' + TEST_LOG_FOLDER)
-#     #os.system('mkdir ' + TEST_LOG_FOLDER)
-# 
-#     if not os.path.exists(TEST_LOG_FOLDER):
-#         os.makedirs(TEST_LOG_FOLDER)
-#     # run test script
-#     os.system('python test.py ' + nn_model)
-# 
-#     # append test performance to the log
-#     rewards, entropies = [], []
-#     test_log_files = os.listdir(TEST_LOG_FOLDER)
-#     for test_log_file in test_log_files:
-#         reward, entropy = [], []
-#         with open(TEST_LOG_FOLDER + test_log_file, 'rb') as f:
-#             for line in f:
-#                 parse = line.split()
-#                 try:
-#                     entropy.append(float(parse[-2]))
-#                     reward.append(float(parse[-1]))
-#                 except IndexError:
-#                     break
-#         rewards.append(np.mean(reward[1:]))
-#         entropies.append(np.mean(entropy[1:]))
-# 
-#     rewards = np.array(rewards)
-# 
-#     rewards_min = np.min(rewards)
-#     rewards_5per = np.percentile(rewards, 5)
-#     rewards_mean = np.mean(rewards)
-#     rewards_median = np.percentile(rewards, 50)
-#     rewards_95per = np.percentile(rewards, 95)
-#     rewards_max = np.max(rewards)
-# 
-#     log_file.write(str(epoch) + '\t' +
-#                    str(rewards_min) + '\t' +
-#                    str(rewards_5per) + '\t' +
-#                    str(rewards_mean) + '\t' +
-#                    str(rewards_median) + '\t' +
-#                    str(rewards_95per) + '\t' +
-#                    str(rewards_max) + '\n')
-#     log_file.flush()
-# 
-#     return rewards_mean, np.mean(entropies)
+def testing(epoch:int, nn_actor_model_path:str, nn_critic_model_path:str, log_file:TextIOWrapper):
+    # clean up the test results folder
+    os.system('rm -r ' + TEST_LOG_FOLDER)
+    #os.system('mkdir ' + TEST_LOG_FOLDER)
+    if not os.path.exists(TEST_LOG_FOLDER):
+        os.makedirs(TEST_LOG_FOLDER)
+    # run test script
+    os.system(f'python test.py {nn_actor_model_path} {nn_critic_model_path}')
+    # append test performance to the log
+    rewards, entropies = [], []
+    test_log_files = os.listdir(TEST_LOG_FOLDER)
+    for test_log_file in test_log_files:
+        reward, entropy = [], []
+        with open(TEST_LOG_FOLDER + test_log_file, 'rb') as f:
+            for line in f:
+                parse = line.split()
+                try:
+                    entropy.append(float(parse[-2]))
+                    reward.append(float(parse[-1]))
+                except IndexError:
+                    break
+        rewards.append(np.mean(reward[1:]))
+        entropies.append(np.mean(entropy[1:]))
+    rewards = np.array(rewards)
+    rewards_min = np.min(rewards)
+    rewards_5per = np.percentile(rewards, 5)
+    rewards_mean = np.mean(rewards)
+    rewards_median = np.percentile(rewards, 50)
+    rewards_95per = np.percentile(rewards, 95)
+    rewards_max = np.max(rewards)
+    log_file.write(str(epoch) + '\t' +
+                   str(rewards_min) + '\t' +
+                   str(rewards_5per) + '\t' +
+                   str(rewards_mean) + '\t' +
+                   str(rewards_median) + '\t' +
+                   str(rewards_95per) + '\t' +
+                   str(rewards_max) + '\n')
+    log_file.flush()
+    return rewards_mean, np.mean(entropies)
         
 def central_agent(net_params_queues, exp_queues):
     assert len(net_params_queues) == NUM_AGENTS
     assert len(exp_queues) == NUM_AGENTS
 
+    # TODO: restore neural net parameters
     actor = network.PPOAgent(NETWORK_HISTORY_LEN, AVAILABLE_VIDEO_BITRATES_COUNT)
 
-    # TODO: restore neural net parameters
+    # Get Writer
+    tensorboard = TensorBoard(log_dir=SUMMARY_DIR, histogram_freq=0,
+                          write_graph=True, write_images=False)
+    with open(LOG_FILE + '_test.txt', 'w') as test_log_file:
+        for epoch in range(TRAIN_EPOCH):
+            # synchronize the network parameters of work agent
+            actor_net_params = actor.get_network_params()
+            for i in range(NUM_AGENTS):
+                net_params_queues[i].put(actor_net_params)
 
-    # while True:  # assemble experiences from agents, compute the gradients
-    for epoch in range(TRAIN_EPOCH):
-        # synchronize the network parameters of work agent
-        actor_net_params = actor.get_network_params()
-        for i in range(NUM_AGENTS):
-            net_params_queues[i].put(actor_net_params)
+            s_batch:list[Observation] = []
+            a_batch:list[npt.NDArray[np.float32]] = []
+            p_batch:list[npt.NDArray[np.float32]]  = []
+            v_batch:list[float] = []
+            for i in range(NUM_AGENTS):
+                s_, a_, p_, g_ = exp_queues[i].get()
+                s_batch += s_
+                a_batch += a_
+                p_batch += p_
+                v_batch += g_
 
-        s_batch:list[Observation] = []
-        a_batch:list[npt.NDArray[np.float32]] = []
-        p_batch:list[npt.NDArray[np.float32]]  = []
-        v_batch:list[float] = []
-        for i in range(NUM_AGENTS):
-            s_, a_, p_, g_ = exp_queues[i].get()
-            s_batch += s_
-            a_batch += a_
-            p_batch += p_
-            v_batch += g_
+            # Train Actor
+            actor.train(s_batch, a_batch, v_batch, p_batch, [tensorboard])
 
-        for _ in range(PPO_TRAINING_EPO):
-            actor.train(s_batch, a_batch, v_batch, p_batch)
-        
-        if epoch % MODEL_SAVE_INTERVAL == 0:
-            # Save the neural net parameters to disk.
-            path = SUMMARY_DIR + "/nn_model_ep_" + str(epoch)
-            save_path = actor.save(path + "_actor.ckpt", path + "_critic.ckpt")
+            if epoch % MODEL_SAVE_INTERVAL == 0:
+                # Save the neural net parameters to disk.
+                actor_path = f"{SUMMARY_DIR}/nn_model_ep_{epoch}_actor.ckpt"
+                critic_path = f"{SUMMARY_DIR}/nn_model_ep_{epoch}_critic.ckpt"
+                save_path = actor.save(actor_path, critic_path)
+
+                # # Write to Log File
+                # avg_reward, avg_entropy = testing(epoch, actor_path, critic_path, test_log_file)
 
 def agent(agent_id, net_params_queue, exp_queue):
     env = ABREnv(agent_id)

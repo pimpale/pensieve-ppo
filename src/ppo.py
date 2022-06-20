@@ -12,12 +12,13 @@ VID_CONV_FILTERS = 128
 HIST_CONV_FILTERS = 128
 HIDDEN_LAYER_SIZE = 128
 
-LR = 1e-4  # Lower lr stabilises training greatly
+LR = 1e-5  # Lower lr stabilises training greatly
 GAMMA = 0.99
 
 # PPO2
-LOSS_CLIPPING=0.1
+LOSS_CLIPPING=0.2
 ENTROPY_LOSS =0.1
+PPO_TRAINING_EPO = 5
 
 class PPOAgent:
     def __init__(self, network_history_len:int, available_video_bitrates_count:int):
@@ -242,6 +243,7 @@ class PPOAgent:
         action_batch: list[npt.NDArray[np.float32]],
         advantage_batch:list[float],
         old_prediction_batch: list[npt.NDArray[np.float32]],
+        callbacks
     ):
         batch_len = len(state_batch)
         assert batch_len == len(action_batch)
@@ -270,19 +272,23 @@ class PPOAgent:
             last_chunk_bitrate[i] = lcb
 
         # Train Actor
-        self.actor.fit([
-            # Required to compute loss
-            advantage,
-            oldpolicy_probs,
-            chosen_action,
-            # Real values
-            historical_network_throughput,
-            historical_chunk_download_time,
-            available_video_bitrates,
-            buffer_level,
-            remaining_chunk_count,
-            last_chunk_bitrate,
-        ])
+        self.actor.fit(
+            [
+                # Required to compute loss
+                advantage,
+                oldpolicy_probs,
+                chosen_action,
+                # Real values
+                historical_network_throughput,
+                historical_chunk_download_time,
+                available_video_bitrates,
+                buffer_level,
+                remaining_chunk_count,
+                last_chunk_bitrate,
+            ],
+            epochs=PPO_TRAINING_EPO,
+            callbacks=callbacks
+        )
 
         # Train Critic
         self.critic.fit(
@@ -294,7 +300,9 @@ class PPOAgent:
                 remaining_chunk_count,
                 last_chunk_bitrate,
             ],
-            advantage
+            advantage,
+            epochs=PPO_TRAINING_EPO,
+            callbacks=callbacks
         )
 
     # value function
