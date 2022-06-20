@@ -270,22 +270,19 @@ class PPOAgent:
             last_chunk_bitrate[i] = lcb
 
         # Train Actor
-        self.actor.fit(
-            [
-                # Required to compute loss
-                advantage,
-                oldpolicy_probs,
-                chosen_action,
-                # Real values
-                historical_network_throughput,
-                historical_chunk_download_time,
-                available_video_bitrates,
-                buffer_level,
-                remaining_chunk_count,
-                last_chunk_bitrate,
-            ],
-            action
-        )
+        self.actor.fit([
+            # Required to compute loss
+            advantage,
+            oldpolicy_probs,
+            chosen_action,
+            # Real values
+            historical_network_throughput,
+            historical_chunk_download_time,
+            available_video_bitrates,
+            buffer_level,
+            remaining_chunk_count,
+            last_chunk_bitrate,
+        ])
 
         # Train Critic
         self.critic.fit(
