@@ -6,6 +6,8 @@ import tensorflow as tf
 from tensorflow import keras
 from keras import backend as K
 
+from env import Observation
+
 # Hyperparameters
 VID_CONV_FILTERS = 128
 HIST_CONV_FILTERS = 128
@@ -28,23 +30,29 @@ class PPOAgent:
     # Private
     def __build_actor(self):
         # network throughput measurements for the last k video chunks
-        feature_historical_network_throughput = keras.layers.Input(shape=(self.network_history_len,1))
+        feature_historical_network_throughput = keras.layers.Input(shape=[self.network_history_len])
         # chunk download times for the last k video chunks
-        feature_historical_chunk_download_time = keras.layers.Input(shape=(self.network_history_len,1))
+        feature_historical_chunk_download_time = keras.layers.Input(shape=[self.network_history_len])
         # a vector of m available sizes for the next video chunk
-        feature_available_video_bitrates = keras.layers.Input(shape=(self.available_video_bitrates_count,1))
+        feature_available_video_bitrates = keras.layers.Input(shape=[self.available_video_bitrates_count])
         # the current buffer level
-        feature_buffer_level = keras.layers.Input(shape=(1,))
+        feature_buffer_level = keras.layers.Input(shape=[1])
         # number of chunks remaining in the video
-        feature_remaining_chunk_count = keras.layers.Input(shape=(1,))
+        feature_remaining_chunk_count = keras.layers.Input(shape=[1])
         # bitrate at which the last chunk was downloaded
-        feature_last_chunk_bitrate = keras.layers.Input(shape=(1,))
+        feature_last_chunk_bitrate = keras.layers.Input(shape=[1])
 
-        convolved_historical_network_throughput = keras.layers.Conv1D(HIST_CONV_FILTERS, 4, activation='relu')(feature_historical_network_throughput)
-        convolved_historical_chunk_download_time = keras.layers.Conv1D(HIST_CONV_FILTERS, 4, activation='relu')(feature_historical_chunk_download_time)
-        convolved_available_video_bitrates = keras.layers.Conv1D(VID_CONV_FILTERS, 4, activation='relu')(feature_available_video_bitrates)
+        convolved_historical_network_throughput = keras.layers.Conv1D(HIST_CONV_FILTERS, 4, activation='relu')(
+           keras.layers.Reshape([self.network_history_len, 1])(feature_historical_network_throughput)
+        )
+        convolved_historical_chunk_download_time = keras.layers.Conv1D(HIST_CONV_FILTERS, 4, activation='relu')(
+           keras.layers.Reshape([self.network_history_len, 1])(feature_historical_chunk_download_time)
+        )
+        convolved_available_video_bitrates = keras.layers.Conv1D(VID_CONV_FILTERS, 4, activation='relu')(
+           keras.layers.Reshape([self.available_video_bitrates_count, 1])(feature_available_video_bitrates)
+        )
 
-        hidden_layer_input = keras.layers.Concatenate(axis=0)([
+        hidden_layer_input = keras.layers.Concatenate()([
           keras.layers.Flatten()(convolved_historical_network_throughput),
           keras.layers.Flatten()(convolved_historical_chunk_download_time),
           keras.layers.Flatten()(convolved_available_video_bitrates),
@@ -87,7 +95,7 @@ class PPOAgent:
             return -K.mean(K.minimum(r * advantage, K.clip(r, min_value=1 - LOSS_CLIPPING, max_value=1 + LOSS_CLIPPING) * advantage) + ENTROPY_LOSS * -(prob * K.log(prob + 1e-10)))
 
         model.compile(
-            optimizer=keras.optimizers.Adam(lr=LR),
+            optimizer=keras.optimizers.Adam(learning_rate=LR),
             loss=actor_loss
         )
         model.summary()
@@ -98,11 +106,11 @@ class PPOAgent:
     # The critic attempts to learn the advantage
     def __build_critic(self):
         # network throughput measurements for the last k video chunks
-        feature_historical_network_throughput = keras.layers.Input(shape=[self.network_history_len])
+        feature_historical_network_throughput = keras.layers.Input(shape=[self.network_history_len, 1])
         # chunk download times for the last k video chunks
-        feature_historical_chunk_download_time = keras.layers.Input(shape=[self.network_history_len])
+        feature_historical_chunk_download_time = keras.layers.Input(shape=[self.network_history_len, 1])
         # a vector of m available sizes for the next video chunk
-        feature_available_video_bitrates = keras.layers.Input(shape=[self.available_video_bitrates_count])
+        feature_available_video_bitrates = keras.layers.Input(shape=[self.available_video_bitrates_count, 1])
         # the current buffer level
         feature_buffer_level = keras.layers.Input(shape=[1])
         # number of chunks remaining in the video
@@ -110,9 +118,15 @@ class PPOAgent:
         # bitrate at which the last chunk was downloaded
         feature_last_chunk_bitrate = keras.layers.Input(shape=[1])
 
-        convolved_historical_network_throughput = keras.layers.Conv1D(HIST_CONV_FILTERS, 4, activation='relu')(feature_historical_network_throughput)
-        convolved_historical_chunk_download_time = keras.layers.Conv1D(HIST_CONV_FILTERS, 4, activation='relu')(feature_historical_chunk_download_time)
-        convolved_available_video_bitrates = keras.layers.Conv1D(VID_CONV_FILTERS, 4, activation='relu')(feature_available_video_bitrates)
+        convolved_historical_network_throughput = keras.layers.Conv1D(HIST_CONV_FILTERS, 4, activation='relu')(
+           keras.layers.Reshape([self.network_history_len, 1])(feature_historical_network_throughput)
+        )
+        convolved_historical_chunk_download_time = keras.layers.Conv1D(HIST_CONV_FILTERS, 4, activation='relu')(
+           keras.layers.Reshape([self.network_history_len, 1])(feature_historical_chunk_download_time)
+        )
+        convolved_available_video_bitrates = keras.layers.Conv1D(VID_CONV_FILTERS, 4, activation='relu')(
+           keras.layers.Reshape([self.available_video_bitrates_count, 1])(feature_available_video_bitrates)
+        )
 
         hidden_layer_input = keras.layers.Concatenate()([
           keras.layers.Flatten()(convolved_historical_network_throughput),
@@ -139,7 +153,7 @@ class PPOAgent:
             outputs=[value]
         )
 
-        model.compile(optimizer=keras.optimizers.Adam(lr=LR), loss='mse')
+        model.compile(optimizer=keras.optimizers.Adam(learning_rate=LR), loss='mse')
 
         return model
 
@@ -163,14 +177,7 @@ class PPOAgent:
 
     def predict(
         self,
-        state_batch: list[tuple[
-            npt.NDArray[np.float32], # historical_network_throughput
-            npt.NDArray[np.float32], # historical_chunk_download_time
-            npt.NDArray[np.float32], # available_video_bitrates
-            np.float32, # buffer_level
-            np.float32, # remaining_chunk_count
-            np.float32  # last_chunk_bitrate
-        ]],
+        state_batch: list[Observation],
     ):
         # Convert state batch into correct format
         historical_network_throughput = np.zeros((len(state_batch), self.network_history_len)) 
@@ -184,13 +191,13 @@ class PPOAgent:
         advantage = np.zeros((len(state_batch), 1))
         old_prediction = np.zeros((len(state_batch), self.available_video_bitrates_count))
 
-        for (i, s) in enumerate(state_batch):
-            historical_network_throughput[i],
-            historical_chunk_download_time[i],
-            available_video_bitrates[i],
-            buffer_level[i],
-            remaining_chunk_count[i],
-            last_chunk_bitrate[i] = s
+        for (i, (hnt, hcdt, avb, bl, rcc, lcb)) in enumerate(state_batch):
+            historical_network_throughput[i] = hnt
+            historical_chunk_download_time[i] = hcdt
+            available_video_bitrates[i] = avb
+            buffer_level[i] = bl
+            remaining_chunk_count[i] = rcc
+            last_chunk_bitrate[i] = lcb
 
         p = self.actor.predict([
             advantage,
@@ -206,15 +213,8 @@ class PPOAgent:
 
     def train(
         self,
-        state_batch: list[tuple[
-            npt.NDArray[np.float32], # historical_network_throughput
-            npt.NDArray[np.float32], # historical_chunk_download_time
-            npt.NDArray[np.float32], # available_video_bitrates
-            np.float32, # buffer_level
-            np.float32, # remaining_chunk_count
-            np.float32  # last_chunk_bitrate
-        ]],
-        old_prediction_batch: list[float],
+        state_batch: list[Observation],
+        old_prediction_batch: list[npt.NDArray[np.float32]],
         advantage_batch:list[float],
     ):
         assert len(state_batch) == len(advantage_batch) 
@@ -230,15 +230,15 @@ class PPOAgent:
 
         # Create other PPO2 things (needed for training, but during inference we dont care)
         advantage = np.reshape(advantage_batch, (len(advantage_batch), 1))
-        old_prediction = np.reshape(old_prediction_batch, (len(advantage_batch), 1))
+        old_prediction = np.reshape(old_prediction_batch, (len(advantage_batch), self.available_video_bitrates_count))
 
-        for (i, s) in enumerate(state_batch):
-            historical_network_throughput[i],
-            historical_chunk_download_time[i],
-            available_video_bitrates[i],
-            buffer_level[i],
-            remaining_chunk_count[i],
-            last_chunk_bitrate[i] = s
+        for (i, (hnt, hcdt, avb, bl, rcc, lcb)) in enumerate(state_batch):
+            historical_network_throughput[i] = hnt
+            historical_chunk_download_time[i] = hcdt
+            available_video_bitrates[i] = avb
+            buffer_level[i] = bl
+            remaining_chunk_count[i] = rcc
+            last_chunk_bitrate[i] = lcb
 
         # Train Actor
         self.actor.fit([
@@ -268,14 +268,7 @@ class PPOAgent:
     # value function
     def compute_v(
         self,
-        state_batch: list[tuple[
-            npt.NDArray[np.float32], # historical_network_throughput
-            npt.NDArray[np.float32], # historical_chunk_download_time
-            npt.NDArray[np.float32], # available_video_bitrates
-            np.float32, # buffer_level
-            np.float32, # remaining_chunk_count
-            np.float32  # last_chunk_bitrate
-        ]],
+        state_batch: list[Observation],
         reward_batch: list[float],
         terminal: bool
     ) -> list[float]:

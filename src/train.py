@@ -1,15 +1,16 @@
 import multiprocessing as mp
 import numpy as np
+import numpy.typing as npt
 import logging
 import os
 import sys
-from env import ABREnv
+from env import ABREnv, Observation
 import ppo as network
 
 NETWORK_HISTORY_LEN = 8
 AVAILABLE_VIDEO_BITRATES_COUNT = 6
 ACTOR_LR_RATE = 1e-4
-NUM_AGENTS = 16
+NUM_AGENTS = 3
 TRAIN_SEQ_LEN = 1000  # take as a train batch
 TRAIN_EPOCH = 500000
 MODEL_SAVE_INTERVAL = 300
@@ -113,7 +114,10 @@ def agent(agent_id, net_params_queue, exp_queue):
 
     for epoch in range(TRAIN_EPOCH):
         obs = env.reset()
-        s_batch, a_batch, p_batch, r_batch = [], [], [], []
+        s_batch:list[Observation] = []
+        a_batch:list[npt.NDArray[np.float32]] = []
+        p_batch:list[npt.NDArray[np.float32]]  = []
+        r_batch:list[float] = []
         done = True
         for step in range(TRAIN_SEQ_LEN):
             s_batch.append(obs)
@@ -126,7 +130,7 @@ def agent(agent_id, net_params_queue, exp_queue):
 
             obs, reward, done, info = env.step(chosen_vid_bitrate_idx)
 
-            action_vec = np.zeros(AVAILABLE_VIDEO_BITRATES_COUNT)
+            action_vec = np.zeros(AVAILABLE_VIDEO_BITRATES_COUNT, dtype="float32")
             action_vec[chosen_vid_bitrate_idx] = 1
             a_batch.append(action_vec)
             r_batch.append(reward)
