@@ -30,11 +30,11 @@ class PPOAgent:
     # Private
     def __build_actor(self):
         # network throughput measurements for the last k video chunks
-        feature_historical_network_throughput = keras.layers.Input(shape=[self.network_history_len])
+        feature_historical_network_throughput = keras.layers.Input(shape=[self.network_history_len, 1])
         # chunk download times for the last k video chunks
-        feature_historical_chunk_download_time = keras.layers.Input(shape=[self.network_history_len])
+        feature_historical_chunk_download_time = keras.layers.Input(shape=[self.network_history_len, 1])
         # a vector of m available sizes for the next video chunk
-        feature_available_video_bitrates = keras.layers.Input(shape=[self.available_video_bitrates_count])
+        feature_available_video_bitrates = keras.layers.Input(shape=[self.available_video_bitrates_count, 1])
         # the current buffer level
         feature_buffer_level = keras.layers.Input(shape=[1])
         # number of chunks remaining in the video
@@ -42,15 +42,9 @@ class PPOAgent:
         # bitrate at which the last chunk was downloaded
         feature_last_chunk_bitrate = keras.layers.Input(shape=[1])
 
-        convolved_historical_network_throughput = keras.layers.Conv1D(HIST_CONV_FILTERS, 4, activation='relu')(
-           keras.layers.Reshape([self.network_history_len, 1])(feature_historical_network_throughput)
-        )
-        convolved_historical_chunk_download_time = keras.layers.Conv1D(HIST_CONV_FILTERS, 4, activation='relu')(
-           keras.layers.Reshape([self.network_history_len, 1])(feature_historical_chunk_download_time)
-        )
-        convolved_available_video_bitrates = keras.layers.Conv1D(VID_CONV_FILTERS, 4, activation='relu')(
-           keras.layers.Reshape([self.available_video_bitrates_count, 1])(feature_available_video_bitrates)
-        )
+        convolved_historical_network_throughput = keras.layers.Conv1D(HIST_CONV_FILTERS, 4, activation='relu')(feature_historical_network_throughput)
+        convolved_historical_chunk_download_time = keras.layers.Conv1D(HIST_CONV_FILTERS, 4, activation='relu')(feature_historical_chunk_download_time)
+        convolved_available_video_bitrates = keras.layers.Conv1D(VID_CONV_FILTERS, 4, activation='relu')(feature_available_video_bitrates)
 
         hidden_layer_input = keras.layers.Concatenate()([
           keras.layers.Flatten()(convolved_historical_network_throughput),
@@ -142,15 +136,9 @@ class PPOAgent:
         # bitrate at which the last chunk was downloaded
         feature_last_chunk_bitrate = keras.layers.Input(shape=[1])
 
-        convolved_historical_network_throughput = keras.layers.Conv1D(HIST_CONV_FILTERS, 4, activation='relu')(
-           keras.layers.Reshape([self.network_history_len, 1])(feature_historical_network_throughput)
-        )
-        convolved_historical_chunk_download_time = keras.layers.Conv1D(HIST_CONV_FILTERS, 4, activation='relu')(
-           keras.layers.Reshape([self.network_history_len, 1])(feature_historical_chunk_download_time)
-        )
-        convolved_available_video_bitrates = keras.layers.Conv1D(VID_CONV_FILTERS, 4, activation='relu')(
-           keras.layers.Reshape([self.available_video_bitrates_count, 1])(feature_available_video_bitrates)
-        )
+        convolved_historical_network_throughput = keras.layers.Conv1D(HIST_CONV_FILTERS, 4, activation='relu')(feature_historical_network_throughput)
+        convolved_historical_chunk_download_time = keras.layers.Conv1D(HIST_CONV_FILTERS, 4, activation='relu')(feature_historical_chunk_download_time)
+        convolved_available_video_bitrates = keras.layers.Conv1D(VID_CONV_FILTERS, 4, activation='relu')(feature_available_video_bitrates)
 
         hidden_layer_input = keras.layers.Concatenate()([
           keras.layers.Flatten()(convolved_historical_network_throughput),
@@ -224,17 +212,19 @@ class PPOAgent:
             remaining_chunk_count[i] = rcc
             last_chunk_bitrate[i] = lcb
 
-        p = self.actor.predict([
-            advantage,
-            oldpolicy_probs,
-            chosen_action,
-            historical_network_throughput,
-            historical_chunk_download_time,
-            available_video_bitrates,
-            buffer_level,
-            remaining_chunk_count,
-            last_chunk_bitrate,
-        ])
+        p = self.actor(
+            [
+                advantage,
+                oldpolicy_probs,
+                chosen_action,
+                historical_network_throughput,
+                historical_chunk_download_time,
+                available_video_bitrates,
+                buffer_level,
+                remaining_chunk_count,
+                last_chunk_bitrate,
+            ],
+        )
         return p
 
     def train(
@@ -329,7 +319,7 @@ class PPOAgent:
         if terminal:
             R_batch[-1, 0] = 0  # terminal state
         else:    
-            v_batch = self.critic.predict(state_batch)
+            v_batch = self.critic(state_batch)
             R_batch[-1, 0] = v_batch[-1, 0]  # boot strap from last state
         # Use GAMMA to decay value 
         for t in reversed(range(ba_size - 1)):

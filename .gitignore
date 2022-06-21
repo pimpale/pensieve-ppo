@@ -2,3 +2,5 @@ src/__pycache__
 
 src/ppo/
 src/test_results/
+src/*.prof
+src/*.png

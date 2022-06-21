@@ -8,6 +8,7 @@ import ppo as network
 import fixed_env as env
 from env import Observation
 
+# tf.debugging.set_log_device_placement(True)
 
 NETWORK_HISTORY_LEN = 8
 VIDEO_BIT_RATES = [300,750,1200,1850,2850,4300]  # Kbps
@@ -144,4 +145,5 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    with tf.device('/GPU:0'):
+        main()

@@ -12,7 +12,7 @@ import ppo as network
 NUM_AGENTS = 16
 TRAIN_SEQ_LEN = 1000  # take as a train batch
 TRAIN_EPOCH = 500000
-MODEL_SAVE_INTERVAL = 300
+MODEL_SAVE_INTERVAL = 100
 RANDOM_SEED = 42
 SUMMARY_DIR = './ppo'
 MODEL_DIR = './models'
@@ -104,8 +104,11 @@ def central_agent(net_params_queues, exp_queues):
                 critic_path = f"{SUMMARY_DIR}/nn_model_ep_{epoch}_critic.ckpt"
                 save_path = actor.save(actor_path, critic_path)
 
-                # # Write to Log File
-                # avg_reward, avg_entropy = testing(epoch, actor_path, critic_path, test_log_file)
+                # Write to Log File
+                avg_reward, avg_entropy = testing(epoch, actor_path, critic_path, test_log_file)
+                tf.summary.scalar('avg_reward', avg_reward, step=step)
+                tf.summary.scalar('avg_entropy', avg_entropy, step=step)
+
 
 def agent(agent_id, net_params_queue, exp_queue):
     env = ABREnv(agent_id)
