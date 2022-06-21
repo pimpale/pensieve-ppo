@@ -116,7 +116,6 @@ class PPOAgent:
         model.compile(
             optimizer=keras.optimizers.Adam(learning_rate=LR),
         )
-        model.summary()
 
         return model
 

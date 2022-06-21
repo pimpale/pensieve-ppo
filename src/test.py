@@ -135,7 +135,6 @@ def main():
             historical_chunk_download_time = np.zeros(NETWORK_HISTORY_LEN, dtype="float32")
 
             video_count += 1
-            print(video_count)
 
             if video_count >= len(all_file_names):
                 break

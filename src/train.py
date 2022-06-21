@@ -33,7 +33,8 @@ def testing(epoch:int, nn_actor_model_path:str, nn_critic_model_path:str, log_fi
     # run test script
     os.system(f'python test.py {nn_actor_model_path} {nn_critic_model_path}')
     # append test performance to the log
-    rewards, entropies = [], []
+    rewards_list:list[float] = []
+    entropies_list:list[float] = []
     test_log_files = os.listdir(TEST_LOG_FOLDER)
     for test_log_file in test_log_files:
         reward, entropy = [], []
@@ -45,9 +46,10 @@ def testing(epoch:int, nn_actor_model_path:str, nn_critic_model_path:str, log_fi
                     reward.append(float(parse[-1]))
                 except IndexError:
                     break
-        rewards.append(np.mean(reward[1:]))
-        entropies.append(np.mean(entropy[1:]))
-    rewards = np.array(rewards)
+        rewards_list.append(np.mean(reward[1:]))
+        entropies_list.append(np.mean(entropy[1:]))
+    rewards = np.array(rewards_list)
+    print(rewards)
     rewards_min = np.min(rewards)
     rewards_5per = np.percentile(rewards, 5)
     rewards_mean = np.mean(rewards)
@@ -62,7 +64,7 @@ def testing(epoch:int, nn_actor_model_path:str, nn_critic_model_path:str, log_fi
                    str(rewards_95per) + '\t' +
                    str(rewards_max) + '\n')
     log_file.flush()
-    return rewards_mean, np.mean(entropies)
+    return rewards_mean, np.mean(entropies_list)
         
 def central_agent(net_params_queues, exp_queues):
     assert len(net_params_queues) == NUM_AGENTS
