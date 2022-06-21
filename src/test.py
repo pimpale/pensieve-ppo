@@ -113,7 +113,7 @@ def main():
         )])[0]
 
         noise = np.random.gumbel(size=len(action_prob))
-        bit_rate = np.argmax(np.log(action_prob) + noise)
+        bit_rate_idx = int(np.argmax(np.log(action_prob) + noise))
         
         entropy_ = -np.dot(action_prob, np.log(action_prob))
         entropy_record.append(entropy_)

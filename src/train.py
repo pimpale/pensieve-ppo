@@ -49,7 +49,6 @@ def testing(epoch:int, nn_actor_model_path:str, nn_critic_model_path:str, log_fi
         rewards_list.append(np.mean(reward[1:]))
         entropies_list.append(np.mean(entropy[1:]))
     rewards = np.array(rewards_list)
-    print(rewards)
     rewards_min = np.min(rewards)
     rewards_5per = np.percentile(rewards, 5)
     rewards_mean = np.mean(rewards)
