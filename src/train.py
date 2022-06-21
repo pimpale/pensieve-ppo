@@ -109,6 +109,8 @@ def central_agent(net_params_queues, exp_queues):
                 avg_reward, avg_entropy = testing(epoch, actor_path, critic_path, test_log_file)
                 tf.summary.scalar('avg_reward', avg_reward, step=step)
                 tf.summary.scalar('avg_entropy', avg_entropy, step=step)
+                tf.summary.scalar('entropy_weight', actor.get_entropy_weight(), step=step)
+
 
 
 def agent(agent_id, net_params_queue, exp_queue):

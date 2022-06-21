@@ -16,9 +16,9 @@ LR = 1e-5  # Lower lr stabilises training greatly
 GAMMA = 0.99
 
 # PPO2
-LOSS_CLIPPING=0.2
-ENTROPY_LOSS =0.1
+ACTOR_PPO_LOSS_CLIPPING=0.2
 PPO_TRAINING_EPO = 5
+H_TARGET = 0.1
 
 class PPOAgent:
     def __init__(self, network_history_len:int, available_video_bitrates_count:int):
@@ -26,6 +26,8 @@ class PPOAgent:
         self.available_video_bitrates_count = available_video_bitrates_count
         self.actor = self.__build_actor()
         self.critic = self.__build_critic()
+        self._entropy_weight:float = np.log(available_video_bitrates_count)
+
 
     # Private
     def __build_actor(self):
@@ -68,12 +70,17 @@ class PPOAgent:
         # https://theaisummer.com/Actor_critics/
         advantage = keras.layers.Input(shape=(1,))
 
+        # Needed for entropy regularization
+        entropy_weight = keras.layers.Input(shape=(1,))
+
+
         model = keras.Model(
             inputs=[
                 # ppo features
                 advantage,
                 oldpolicy_probs,
                 action_chosen,
+                entropy_weight,
                 # real features
                 feature_historical_network_throughput,
                 feature_historical_chunk_download_time,
@@ -86,7 +93,7 @@ class PPOAgent:
         )
 
 
-        def actor_ppo_loss(newpolicy_probs, oldpolicy_probs, action_chosen, advantage):
+        def actor_ppo_loss(newpolicy_probs, oldpolicy_probs, action_chosen, advantage, entropy_weight):
             # Reward???? IDK what this function does
             def r(pi_new, pi_old, acts):
                 return tf.reduce_sum(tf.multiply(pi_new, acts), axis=1, keepdims=True) / \
@@ -95,7 +102,7 @@ class PPOAgent:
             # Unsure what this value represents??
             rv = r(newpolicy_probs, oldpolicy_probs, action_chosen)
             # PPO2 Loss Clipping
-            ppo2loss = tf.minimum(rv, tf.clip_by_value(rv, 1-LOSS_CLIPPING, 1+LOSS_CLIPPING)) * advantage
+            ppo2loss = tf.minimum(rv, tf.clip_by_value(rv, 1-ACTOR_PPO_LOSS_CLIPPING, 1+ACTOR_PPO_LOSS_CLIPPING)) * advantage
 
             # Dual Loss (Unsure what the advantage of this is???)
             dual_loss = tf.where(tf.less(advantage, 0.), tf.maximum(ppo2loss, 3. * advantage), ppo2loss)
@@ -104,13 +111,14 @@ class PPOAgent:
             entropy = -tf.reduce_sum(tf.multiply(newpolicy_probs, tf.math.log(newpolicy_probs)), axis=1, keepdims=True)
 
             # actor loss
-            return -tf.reduce_sum(dual_loss) - ENTROPY_LOSS * entropy
+            return -tf.reduce_sum(dual_loss) - entropy_weight * entropy
 
         model.add_loss(actor_ppo_loss(
           newpolicy_probs=action_probs,
           oldpolicy_probs=oldpolicy_probs,
           action_chosen=action_chosen,
-          advantage=advantage
+          advantage=advantage,
+          entropy_weight=entropy_weight
         ))
 
         model.compile(
@@ -190,18 +198,22 @@ class PPOAgent:
         self,
         state_batch: list[Observation],
     ):
+
+        batch_len = len(state_batch)
+
         # Convert state batch into correct format
-        historical_network_throughput = np.zeros((len(state_batch), self.network_history_len)) 
-        historical_chunk_download_time = np.zeros((len(state_batch), self.network_history_len)) 
-        available_video_bitrates = np.zeros((len(state_batch), self.available_video_bitrates_count))
-        buffer_level = np.zeros((len(state_batch), 1))
-        remaining_chunk_count  = np.zeros((len(state_batch), 1))
-        last_chunk_bitrate  = np.zeros((len(state_batch), 1))
+        historical_network_throughput = np.zeros((batch_len, self.network_history_len)) 
+        historical_chunk_download_time = np.zeros((batch_len, self.network_history_len)) 
+        available_video_bitrates = np.zeros((batch_len, self.available_video_bitrates_count))
+        buffer_level = np.zeros((batch_len, 1))
+        remaining_chunk_count  = np.zeros((batch_len, 1))
+        last_chunk_bitrate  = np.zeros((batch_len , 1))
 
         # Create other PPO2 things (needed for training, but during inference we dont care)
-        advantage = np.zeros((len(state_batch), 1))
-        oldpolicy_probs = np.zeros((len(state_batch), self.available_video_bitrates_count))
-        chosen_action= np.zeros((len(state_batch), self.available_video_bitrates_count))
+        advantage = np.zeros((batch_len, 1))
+        oldpolicy_probs = np.zeros((batch_len, self.available_video_bitrates_count))
+        chosen_action= np.zeros((batch_len, self.available_video_bitrates_count))
+        entropy_weight = np.zeros((batch_len, 1))
 
         for (i, (hnt, hcdt, avb, bl, rcc, lcb)) in enumerate(state_batch):
             historical_network_throughput[i] = hnt
@@ -213,9 +225,12 @@ class PPOAgent:
 
         p = self.actor(
             [
+                # Dummy
                 advantage,
                 oldpolicy_probs,
                 chosen_action,
+                entropy_weight,
+                # Real
                 historical_network_throughput,
                 historical_chunk_download_time,
                 available_video_bitrates,
@@ -252,6 +267,8 @@ class PPOAgent:
         oldpolicy_probs= np.reshape(old_prediction_batch, (batch_len, self.available_video_bitrates_count))
         chosen_action = np.reshape(action_batch, (batch_len, self.available_video_bitrates_count))
 
+        entropy_weight = np.full((batch_len, 1), self._entropy_weight);
+
         for (i, (hnt, hcdt, avb, bl, rcc, lcb)) in enumerate(state_batch):
             historical_network_throughput[i] = hnt
             historical_chunk_download_time[i] = hcdt
@@ -274,6 +291,7 @@ class PPOAgent:
                 advantage,
                 oldpolicy_probs,
                 chosen_action,
+                entropy_weight,
                 # Real values
                 historical_network_throughput,
                 historical_chunk_download_time,
@@ -283,7 +301,7 @@ class PPOAgent:
                 last_chunk_bitrate,
             ],
             epochs=PPO_TRAINING_EPO,
-            callbacks=[PrintLoss(base_step, 'actor_loss')]
+            callbacks=[PrintLoss(base_step, 'loss_actor')]
         )
 
         # Train Critic
@@ -301,7 +319,15 @@ class PPOAgent:
             callbacks=[PrintLoss(base_step, 'critic_loss')]
         )
 
+        p_batch = np.clip(oldpolicy_probs, ACTOR_PPO_LOSS_CLIPPING, 1. - ACTOR_PPO_LOSS_CLIPPING)
+        H = np.mean(np.sum(-np.log(p_batch) * p_batch, axis=1))
+        g = H - H_TARGET
+        self._entropy_weight -= LR * g * 0.1
+
         return PPO_TRAINING_EPO
+
+    def get_entropy_weight(self) -> float:
+        return self._entropy_weight
 
     # value function
     def compute_v(
