@@ -1,5 +1,6 @@
 from typing import TYPE_CHECKING
 import math
+import sys
 import numpy as np
 import numpy.typing as npt
 import tensorflow as tf
@@ -12,13 +13,14 @@ VID_CONV_FILTERS = 128
 HIST_CONV_FILTERS = 128
 HIDDEN_LAYER_SIZE = 128
 
-LR = 1e-5  # Lower lr stabilises training greatly
+ACTOR_LR = 1e-5  # Lower lr stabilises training greatly
+CRITIC_LR = 1e-4  # Lower lr stabilises training greatly
 GAMMA = 0.99
 
 # PPO2
 ACTOR_PPO_LOSS_CLIPPING=0.2
 PPO_TRAINING_EPO = 5
-H_TARGET = 0.1
+ENTROPY_TARGET = 0.1
 
 class PPOAgent:
     def __init__(self, network_history_len:int, available_video_bitrates_count:int):
@@ -108,10 +110,12 @@ class PPOAgent:
             dual_loss = tf.where(tf.less(advantage, 0.), tf.maximum(ppo2loss, 3. * advantage), ppo2loss)
 
             # Calculate Entropy (how uncertain the prediction is)
+            # This ends up being a positive number since all probas are between 0 and 1
             entropy = -tf.reduce_sum(tf.multiply(newpolicy_probs, tf.math.log(newpolicy_probs)), axis=1, keepdims=True)
 
             # actor loss
-            return -tf.reduce_sum(dual_loss) - entropy_weight * entropy
+            # Reward high entropy
+            return -tf.reduce_sum(dual_loss) - entropy_weight * tf.reduce_sum(entropy)
 
         model.add_loss(actor_ppo_loss(
           newpolicy_probs=action_probs,
@@ -122,7 +126,7 @@ class PPOAgent:
         ))
 
         model.compile(
-            optimizer=keras.optimizers.Adam(learning_rate=LR),
+            optimizer=keras.optimizers.Adam(learning_rate=ACTOR_LR),
         )
 
         return model
@@ -172,7 +176,7 @@ class PPOAgent:
             outputs=[value]
         )
 
-        model.compile(optimizer=keras.optimizers.Adam(learning_rate=LR), loss='mse')
+        model.compile(optimizer=keras.optimizers.Adam(learning_rate=CRITIC_LR), loss='mse')
 
         return model
 
@@ -320,9 +324,8 @@ class PPOAgent:
         )
 
         p_batch = np.clip(oldpolicy_probs, ACTOR_PPO_LOSS_CLIPPING, 1. - ACTOR_PPO_LOSS_CLIPPING)
-        H = np.mean(np.sum(-np.log(p_batch) * p_batch, axis=1))
-        g = H - H_TARGET
-        self._entropy_weight -= LR * g * 0.1
+        entropy = np.mean(np.sum(-np.log(p_batch) * p_batch, axis=1))
+        self._entropy_weight -= ACTOR_LR * (entropy - ENTROPY_TARGET ) * 0.1
 
         return PPO_TRAINING_EPO
 
